@@ -48,8 +48,8 @@ use std::fmt::Debug;
 
 pub use condition::{parse_condition, parse_to, Condition};
 use condition::{
-    parse_exists, parse_is_empty, parse_is_not_empty, parse_is_not_null, parse_is_null,
-    parse_not_exists,
+    parse_contains, parse_ends_with, parse_exists, parse_is_empty, parse_is_not_empty,
+    parse_is_not_null, parse_is_null, parse_not_exists, parse_starts_with,
 };
 use error::{cut_with_err, ExpectedValueKind, NomErrorExt};
 pub use error::{Error, ErrorKind};
@@ -444,6 +444,9 @@ fn parse_primary(input: Span, depth: usize) -> IResult<FilterCondition> {
         parse_geo_bounding_box,
         parse_in,
         parse_not_in,
+        parse_contains,
+        parse_starts_with,
+        parse_ends_with,
         parse_condition,
         parse_is_null,
         parse_is_not_null,
@@ -470,77 +473,6 @@ pub fn parse_expression(input: Span, depth: usize) -> IResult<FilterCondition> {
 /// filter     = expression EOF
 pub fn parse_filter(input: Span) -> IResult<FilterCondition> {
     terminated(|input| parse_expression(input, 0), eof)(input)
-}
-
-impl<'a> std::fmt::Display for FilterCondition<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FilterCondition::Not(filter) => {
-                write!(f, "NOT ({filter})")
-            }
-            FilterCondition::Condition { fid, op } => {
-                write!(f, "{fid} {op}")
-            }
-            FilterCondition::In { fid, els } => {
-                write!(f, "{fid} IN[")?;
-                for el in els {
-                    write!(f, "{el}, ")?;
-                }
-                write!(f, "]")
-            }
-            FilterCondition::Or(els) => {
-                write!(f, "OR[")?;
-                for el in els {
-                    write!(f, "{el}, ")?;
-                }
-                write!(f, "]")
-            }
-            FilterCondition::And(els) => {
-                write!(f, "AND[")?;
-                for el in els {
-                    write!(f, "{el}, ")?;
-                }
-                write!(f, "]")
-            }
-            FilterCondition::GeoLowerThan { point, radius } => {
-                write!(f, "_geoRadius({}, {}, {})", point[0], point[1], radius)
-            }
-            FilterCondition::GeoBoundingBox {
-                top_right_point: top_left_point,
-                bottom_left_point: bottom_right_point,
-            } => {
-                write!(
-                    f,
-                    "_geoBoundingBox([{}, {}], [{}, {}])",
-                    top_left_point[0],
-                    top_left_point[1],
-                    bottom_right_point[0],
-                    bottom_right_point[1]
-                )
-            }
-        }
-    }
-}
-impl<'a> std::fmt::Display for Condition<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Condition::GreaterThan(token) => write!(f, "> {token}"),
-            Condition::GreaterThanOrEqual(token) => write!(f, ">= {token}"),
-            Condition::Equal(token) => write!(f, "= {token}"),
-            Condition::NotEqual(token) => write!(f, "!= {token}"),
-            Condition::Null => write!(f, "IS NULL"),
-            Condition::Empty => write!(f, "IS EMPTY"),
-            Condition::Exists => write!(f, "EXISTS"),
-            Condition::LowerThan(token) => write!(f, "< {token}"),
-            Condition::LowerThanOrEqual(token) => write!(f, "<= {token}"),
-            Condition::Between { from, to } => write!(f, "{from} TO {to}"),
-        }
-    }
-}
-impl<'a> std::fmt::Display for Token<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{{}}}", self.value())
-    }
 }
 
 #[cfg(test)]
@@ -574,6 +506,13 @@ pub mod tests {
 
     #[test]
     fn parse() {
+        use FilterCondition as Fc;
+
+        #[track_caller]
+        fn p(s: &str) -> impl std::fmt::Display + '_ {
+            Fc::parse(s).unwrap().unwrap()
+        }
+
         // Test equal
         insta::assert_display_snapshot!(p("channel = Ponce"), @"{channel} = {Ponce}");
         insta::assert_display_snapshot!(p("subscribers = 12"), @"{subscribers} = {12}");
@@ -638,6 +577,27 @@ pub mod tests {
         insta::assert_display_snapshot!(p("subscribers NOT EXISTS"), @"NOT ({subscribers} EXISTS)");
         insta::assert_display_snapshot!(p("NOT subscribers NOT EXISTS"), @"{subscribers} EXISTS");
         insta::assert_display_snapshot!(p("subscribers NOT   EXISTS"), @"NOT ({subscribers} EXISTS)");
+
+        // Test CONTAINS + NOT CONTAINS
+        insta::assert_display_snapshot!(p("subscribers CONTAINS 'hello'"), @"{subscribers} CONTAINS {hello}");
+        insta::assert_display_snapshot!(p("NOT subscribers CONTAINS 'hello'"), @"NOT ({subscribers} CONTAINS {hello})");
+        insta::assert_display_snapshot!(p("subscribers NOT CONTAINS hello"), @"NOT ({subscribers} CONTAINS {hello})");
+        insta::assert_display_snapshot!(p("NOT subscribers NOT CONTAINS 'hello'"), @"{subscribers} CONTAINS {hello}");
+        insta::assert_display_snapshot!(p("subscribers NOT   CONTAINS 'hello'"), @"NOT ({subscribers} CONTAINS {hello})");
+
+        // Test STARTS WITH + NOT STARTS WITH
+        insta::assert_display_snapshot!(p("subscribers STARTS WITH 'hello'"), @"{subscribers} STARTS WITH {hello}");
+        insta::assert_display_snapshot!(p("NOT subscribers STARTS WITH 'hello'"), @"NOT ({subscribers} STARTS WITH {hello})");
+        insta::assert_display_snapshot!(p("subscribers NOT STARTS WITH hello"), @"NOT ({subscribers} STARTS WITH {hello})");
+        insta::assert_display_snapshot!(p("NOT subscribers NOT STARTS WITH 'hello'"), @"{subscribers} STARTS WITH {hello}");
+        insta::assert_display_snapshot!(p("subscribers NOT   STARTS WITH 'hello'"), @"NOT ({subscribers} STARTS WITH {hello})");
+
+        // Test ENDS WITH + NOT ENDS WITH
+        insta::assert_display_snapshot!(p("subscribers ENDS WITH 'hello'"), @"{subscribers} ENDS WITH {hello}");
+        insta::assert_display_snapshot!(p("NOT subscribers ENDS WITH 'hello'"), @"NOT ({subscribers} ENDS WITH {hello})");
+        insta::assert_display_snapshot!(p("subscribers NOT ENDS WITH hello"), @"NOT ({subscribers} ENDS WITH {hello})");
+        insta::assert_display_snapshot!(p("NOT subscribers NOT ENDS WITH 'hello'"), @"{subscribers} ENDS WITH {hello}");
+        insta::assert_display_snapshot!(p("subscribers NOT   ENDS WITH 'hello'"), @"NOT ({subscribers} ENDS WITH {hello})");
 
         // Test nested NOT
         insta::assert_display_snapshot!(p("NOT NOT NOT NOT x = 5"), @"{x} = {5}");
@@ -710,7 +670,7 @@ pub mod tests {
         "###);
 
         insta::assert_display_snapshot!(p("'OR'"), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `\'OR\'`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `\'OR\'`.
         1:5 'OR'
         "###);
 
@@ -720,12 +680,12 @@ pub mod tests {
         "###);
 
         insta::assert_display_snapshot!(p("channel Ponce"), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `channel Ponce`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `channel Ponce`.
         1:14 channel Ponce
         "###);
 
         insta::assert_display_snapshot!(p("channel = Ponce OR"), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` but instead got nothing.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` but instead got nothing.
         19:19 channel = Ponce OR
         "###);
 
@@ -810,12 +770,12 @@ pub mod tests {
         "###);
 
         insta::assert_display_snapshot!(p("colour NOT EXIST"), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `colour NOT EXIST`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `colour NOT EXIST`.
         1:17 colour NOT EXIST
         "###);
 
         insta::assert_display_snapshot!(p("subscribers 100 TO1000"), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `subscribers 100 TO1000`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `subscribers 100 TO1000`.
         1:23 subscribers 100 TO1000
         "###);
 
@@ -878,35 +838,35 @@ pub mod tests {
         "###);
 
         insta::assert_display_snapshot!(p(r#"value NULL"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value NULL`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value NULL`.
         1:11 value NULL
         "###);
         insta::assert_display_snapshot!(p(r#"value NOT NULL"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value NOT NULL`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value NOT NULL`.
         1:15 value NOT NULL
         "###);
         insta::assert_display_snapshot!(p(r#"value EMPTY"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value EMPTY`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value EMPTY`.
         1:12 value EMPTY
         "###);
         insta::assert_display_snapshot!(p(r#"value NOT EMPTY"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value NOT EMPTY`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value NOT EMPTY`.
         1:16 value NOT EMPTY
         "###);
         insta::assert_display_snapshot!(p(r#"value IS"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value IS`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value IS`.
         1:9 value IS
         "###);
         insta::assert_display_snapshot!(p(r#"value IS NOT"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value IS NOT`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value IS NOT`.
         1:13 value IS NOT
         "###);
         insta::assert_display_snapshot!(p(r#"value IS EXISTS"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value IS EXISTS`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value IS EXISTS`.
         1:16 value IS EXISTS
         "###);
         insta::assert_display_snapshot!(p(r#"value IS NOT EXISTS"#), @r###"
-        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `_geoRadius`, or `_geoBoundingBox` at `value IS NOT EXISTS`.
+        Was expecting an operation `=`, `!=`, `>=`, `>`, `<=`, `<`, `IN`, `NOT IN`, `TO`, `EXISTS`, `NOT EXISTS`, `IS NULL`, `IS NOT NULL`, `IS EMPTY`, `IS NOT EMPTY`, `CONTAINS`, `STARTS WITH`, `ENDS WITH`, `_geoRadius`, or `_geoBoundingBox` at `value IS NOT EXISTS`.
         1:20 value IS NOT EXISTS
         "###);
     }
@@ -931,5 +891,79 @@ pub mod tests {
         let s = "test string that should not be parsed";
         let token: Token = s.into();
         assert_eq!(token.value(), s);
+    }
+}
+
+impl<'a> std::fmt::Display for FilterCondition<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterCondition::Not(filter) => {
+                write!(f, "NOT ({filter})")
+            }
+            FilterCondition::Condition { fid, op } => {
+                write!(f, "{fid} {op}")
+            }
+            FilterCondition::In { fid, els } => {
+                write!(f, "{fid} IN[")?;
+                for el in els {
+                    write!(f, "{el}, ")?;
+                }
+                write!(f, "]")
+            }
+            FilterCondition::Or(els) => {
+                write!(f, "OR[")?;
+                for el in els {
+                    write!(f, "{el}, ")?;
+                }
+                write!(f, "]")
+            }
+            FilterCondition::And(els) => {
+                write!(f, "AND[")?;
+                for el in els {
+                    write!(f, "{el}, ")?;
+                }
+                write!(f, "]")
+            }
+            FilterCondition::GeoLowerThan { point, radius } => {
+                write!(f, "_geoRadius({}, {}, {})", point[0], point[1], radius)
+            }
+            FilterCondition::GeoBoundingBox {
+                top_right_point: top_left_point,
+                bottom_left_point: bottom_right_point,
+            } => {
+                write!(
+                    f,
+                    "_geoBoundingBox([{}, {}], [{}, {}])",
+                    top_left_point[0],
+                    top_left_point[1],
+                    bottom_right_point[0],
+                    bottom_right_point[1]
+                )
+            }
+        }
+    }
+}
+impl<'a> std::fmt::Display for Condition<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Condition::GreaterThan(token) => write!(f, "> {token}"),
+            Condition::GreaterThanOrEqual(token) => write!(f, ">= {token}"),
+            Condition::Equal(token) => write!(f, "= {token}"),
+            Condition::NotEqual(token) => write!(f, "!= {token}"),
+            Condition::Null => write!(f, "IS NULL"),
+            Condition::Empty => write!(f, "IS EMPTY"),
+            Condition::Exists => write!(f, "EXISTS"),
+            Condition::LowerThan(token) => write!(f, "< {token}"),
+            Condition::LowerThanOrEqual(token) => write!(f, "<= {token}"),
+            Condition::Between { from, to } => write!(f, "{from} TO {to}"),
+            Condition::Contains(token) => write!(f, "CONTAINS {token}"),
+            Condition::StartsWith(token) => write!(f, "STARTS WITH {token}"),
+            Condition::EndsWith(token) => write!(f, "ENDS WITH {token}"),
+        }
+    }
+}
+impl<'a> std::fmt::Display for Token<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{{}}}", self.value())
     }
 }
