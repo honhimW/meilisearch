@@ -4,8 +4,7 @@ use std::ops::Bound::{self, Excluded, Included};
 
 use either::Either;
 pub use filter_parser::{Condition, Error as FPError, FilterCondition, Span, Token};
-use heed::types::DecodeIgnore;
-use heed::LazyDecode;
+use heed::types::{DecodeIgnore, LazyDecode};
 use memchr::memmem::{Finder, FinderRev};
 use roaring::{MultiOps, RoaringBitmap};
 use serde_json::Value;
