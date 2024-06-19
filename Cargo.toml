@@ -14,7 +14,7 @@ members = [
     "filter-parser",
     "flatten-serde-json",
     "json-depth-checker",
-    "benchmarks",
+#    "benchmarks",
     "fuzzers",
     "tracing-trace",
     "xtask",

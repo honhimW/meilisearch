@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display};
 use std::ops::Bound::{self, Excluded, Included};
 
 use either::Either;
-pub use filter_parser::{Condition, Error as FPError, FilterCondition, Span, Token};
+pub use filter_parser::{Condition, Error as FPError, FilterCondition, Token};
 use heed::types::{DecodeIgnore, LazyDecode};
 use memchr::memmem::{Finder, FinderRev};
 use roaring::{MultiOps, RoaringBitmap};
@@ -306,9 +306,10 @@ impl<'a> Filter<'a> {
                                 None
                             }
                         }
-                        Err(e) => Some(Err(e)),
+                        Err(_) => None,
+                        // Err(e) => Some(Err(e)).map(Into::into),
                     })
-                    .union()?;
+                    .union().unwrap();
 
                 return Ok(docids);
             }
@@ -339,9 +340,10 @@ impl<'a> Filter<'a> {
                                 None
                             }
                         }
-                        Err(e) => Some(Err(e)),
+                        Err(_) => None,
+                        // Err(e) => Some(Err(e)).map(Into::into),
                     })
-                    .union()?;
+                    .union().unwrap();
 
                 return Ok(docids);
             }
